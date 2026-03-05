@@ -961,6 +961,55 @@ const refreshKPIs = async () => {
     console.warn('Header formatting failed:', e.message)
   }
 
+  // ---- SECTION G: Chart Descriptions (A13:B35) ----
+  const descRows = [
+    ['', ''],
+    ['CHART GUIDE', ''],
+    ['', ''],
+    ['📊 Variance Distribution', ''],
+    ['', 'Shows how count variances are spread across ranges. "Zero" means the physical count matched'],
+    ['', 'the expected quantity exactly. Positive means you found MORE than expected; negative means LESS.'],
+    ['', 'Ideally the "Zero (Perfect)" bar should be the tallest. Large bars on +6/−6 indicate systemic issues.'],
+    ['', ''],
+    ['🎯 Count Accuracy', ''],
+    ['', 'Pie chart showing the ratio of perfect counts (zero variance) vs imperfect counts.'],
+    ['', 'Target: 95%+ accuracy. If the "Imperfect" slice is large, investigate top-variance SKUs below.'],
+    ['', ''],
+    ['📦 SKU Coverage', ''],
+    ['', 'Pie chart showing how many of your inventory SKUs have been cycle-counted at least once.'],
+    ['', 'Target: 100% coverage over the count cycle. A large "Not Counted" slice means more SKUs need attention.'],
+    ['', ''],
+    ['👥 Counts by Device', ''],
+    ['', 'Bar chart showing how many counts each team member (device) has submitted.'],
+    ['', 'Use this to balance workload across counters and identify top contributors.'],
+    ['', ''],
+    ['⚠️ Top Variance SKUs', ''],
+    ['', 'Horizontal bar chart of the 10 SKUs with the largest absolute variance.'],
+    ['', 'These are your problem SKUs — investigate for misplacement, theft, receiving errors, or bad bin locations.'],
+    ['', 'Recount these SKUs first to confirm or correct the discrepancy.']
+  ]
+  const descEndRow = 12 + descRows.length
+  await graph('PATCH', kpiBase + "/range(address='A13:B" + descEndRow + "')", { values: descRows })
+
+  // Format chart guide header
+  try {
+    await graph('PATCH', kpiBase + "/range(address='A14:B14')/format/font", { bold: true, size: 14 })
+    // Format each chart title row bold
+    await graph('PATCH', kpiBase + "/range(address='A16:A16')/format/font", { bold: true })
+    await graph('PATCH', kpiBase + "/range(address='A21:A21')/format/font", { bold: true })
+    await graph('PATCH', kpiBase + "/range(address='A25:A25')/format/font", { bold: true })
+    await graph('PATCH', kpiBase + "/range(address='A29:A29')/format/font", { bold: true })
+    await graph('PATCH', kpiBase + "/range(address='A33:A33')/format/font", { bold: true })
+    // Make description text italic and gray
+    await graph('PATCH', kpiBase + "/range(address='B17:B19')/format/font", { italic: true, color: '#666666' })
+    await graph('PATCH', kpiBase + "/range(address='B22:B23')/format/font", { italic: true, color: '#666666' })
+    await graph('PATCH', kpiBase + "/range(address='B26:B27')/format/font", { italic: true, color: '#666666' })
+    await graph('PATCH', kpiBase + "/range(address='B30:B30')/format/font", { italic: true, color: '#666666' })
+    await graph('PATCH', kpiBase + "/range(address='B34:B36')/format/font", { italic: true, color: '#666666' })
+  } catch (e) {
+    console.warn('Description formatting failed:', e.message)
+  }
+
   // ---- Auto-fit columns ----
   try {
     await graph('POST', kpiBase + "/range(address='A:H')/format/autofitColumns", {})
