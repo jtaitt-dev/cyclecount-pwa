@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a0e1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Cycle Count</title>
+<script>(function(){var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.setAttribute('data-theme','light');var m=document.querySelector('meta[name=theme-color]');if(m)m.content='#f0f2f5'}})()</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0e1a;--surface:#131a2e;--border:rgba(255,255,255,.07);
+  --border-focus:rgba(59,130,246,.5);--text:#e2e8f0;--muted:#94a3b8;--dim:#64748b;
+  --primary:#3b82f6;--success:#22c55e;--success-bg:rgba(34,197,94,.12);
+  --warning:#f59e0b;--warning-bg:rgba(245,158,11,.12);
+  --danger:#ef4444;--danger-bg:rgba(239,68,68,.12);
+  --radius:14px;--radius-sm:10px;
+  --input-bg:rgba(0,0,0,.3);--secondary-bg:rgba(255,255,255,.08);--secondary-hover:rgba(255,255,255,.12);
+  --card-inset:rgba(0,0,0,.15);--badge-bg:rgba(0,0,0,.2);--kpi-bg:rgba(255,255,255,.04);
+  --bar-bg:rgba(10,14,26,.95);--toast-border:rgba(255,255,255,.15);
+  --gear-bg:rgba(255,255,255,.06);--scrollbar:rgba(255,255,255,.1);
+  --focus-ring:rgba(59,130,246,.15);--step-primary-bg:rgba(59,130,246,.15);
+  --local-bg:rgba(148,163,184,.15);--danger-border:rgba(239,68,68,.3);
+  --modal-bg:rgba(0,0,0,.6)
+}
+[data-theme="light"]{
+  --bg:#f0f2f5;--surface:#ffffff;--border:rgba(0,0,0,.1);
+  --border-focus:rgba(59,130,246,.4);--text:#1e293b;--muted:#64748b;--dim:#94a3b8;
+  --primary:#2563eb;--success:#16a34a;--success-bg:rgba(22,163,74,.08);
+  --warning:#d97706;--warning-bg:rgba(217,119,6,.08);
+  --danger:#dc2626;--danger-bg:rgba(220,38,38,.08);
+  --input-bg:rgba(0,0,0,.04);--secondary-bg:rgba(0,0,0,.06);--secondary-hover:rgba(0,0,0,.1);
+  --card-inset:rgba(0,0,0,.03);--badge-bg:rgba(0,0,0,.05);--kpi-bg:rgba(0,0,0,.03);
+  --bar-bg:rgba(255,255,255,.95);--toast-border:rgba(0,0,0,.12);
+  --gear-bg:rgba(0,0,0,.06);--scrollbar:rgba(0,0,0,.12);
+  --focus-ring:rgba(59,130,246,.12);--step-primary-bg:rgba(37,99,235,.1);
+  --local-bg:rgba(100,116,139,.12);--danger-border:rgba(220,38,38,.25);
+  --modal-bg:rgba(0,0,0,.4)
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;transition:background .25s,color .25s}
+.wrap{max-width:640px;margin:0 auto;padding:16px 16px 110px}
+
+/* Header */
+header{margin-bottom:20px}
+.header-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.header-top h1{font-size:24px;font-weight:700}
+.status-chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;font-size:13px;background:var(--surface);border:1px solid var(--border);color:var(--muted)}
+.chip-val{font-weight:700}
+.chip-val.good{color:var(--success)}.chip-val.warn{color:var(--warning)}.chip-val.bad{color:var(--danger)}
+
+/* Theme toggle */
+.theme-toggle{width:42px;min-height:42px;padding:0;font-size:20px;background:var(--secondary-bg);border-radius:50%;line-height:1;flex-shrink:0;border:1px solid var(--border);transition:background .15s}
+.theme-toggle:hover{background:var(--secondary-hover)}
+
+/* Cards */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px;transition:background .25s,border-color .25s}
+.count-card{border-top:2px solid var(--primary)}
+.section-title{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:16px}
+
+/* Setup collapse */
+.setup-header{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.toggle-icon{transition:transform .2s;color:var(--muted);font-size:18px}
+.setup-header.collapsed .toggle-icon{transform:rotate(-90deg)}
+.setup-body{overflow:hidden;transition:max-height .3s ease,opacity .25s ease;max-height:600px;opacity:1}
+.setup-body.collapsed{max-height:0!important;opacity:0}
+
+/* Setup steps */
+.setup-step{display:flex;gap:14px;align-items:flex-start;padding:14px 0;border-bottom:1px solid var(--border)}
+.setup-step:last-child{border-bottom:none}
+.step-num{width:28px;height:28px;border-radius:50%;background:var(--step-primary-bg);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0;margin-top:2px}
+.step-num.done{background:var(--success-bg);color:var(--success)}
+.step-content{flex:1;min-width:0}
+.step-label{font-size:14px;font-weight:600;margin-bottom:8px}
+.step-status{font-size:13px;color:var(--muted);margin-top:6px}
+.step-status.good{color:var(--success)}
+
+/* Form */
+.form-row{display:grid;gap:12px;margin-bottom:14px}
+.form-row.cols-2{grid-template-columns:1fr 1fr}
+.form-row.cols-3{grid-template-columns:1fr 1fr 1fr}
+@media(max-width:480px){.form-row.cols-2,.form-row.cols-3{grid-template-columns:1fr}}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.3px}
+.field input,.field textarea{width:100%;padding:12px 14px;font-size:16px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--input-bg);color:var(--text);transition:border-color .2s,background .25s;outline:none}
+.field input:focus,.field textarea:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px var(--focus-ring)}
+.field input[readonly]{opacity:.6;cursor:default}
+.field textarea{min-height:80px;resize:vertical}
+
+/* Buttons */
+button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;font-size:15px;font-weight:600;border:none;border-radius:var(--radius-sm);cursor:pointer;transition:background .15s,opacity .15s,transform .1s;color:#fff;background:var(--primary);width:100%;min-height:48px}
+button:active:not(:disabled){transform:scale(.98)}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.secondary{background:var(--secondary-bg);color:var(--text)}
+button.secondary:hover:not(:disabled){background:var(--secondary-hover)}
+button.success{background:var(--success)}
+button.success:hover:not(:disabled){background:#16a34a}
+button.danger-outline{background:transparent;color:var(--danger);border:1px solid var(--danger-border)}
+button.danger-outline:hover:not(:disabled){background:var(--danger-bg)}
+.btn-row{display:grid;gap:10px;margin-top:14px}
+.btn-row.cols-2{grid-template-columns:1fr 1fr}
+.btn-row.cols-3{grid-template-columns:1fr 1fr 1fr}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+button.loading{animation:pulse 1.2s ease-in-out infinite}
+
+/* Status badges */
+.status-badges{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.badge-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;font-size:13px;border:1px solid var(--border);background:var(--badge-bg);color:var(--muted)}
+.badge-val{font-weight:700}
+.badge-val.good{color:var(--success)}.badge-val.warn{color:var(--warning)}.badge-val.bad{color:var(--danger)}
+
+/* KPIs */
+.kpi-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px}
+@media(min-width:500px){.kpi-grid{grid-template-columns:repeat(4,1fr)}}
+.kpi{background:var(--kpi-bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;text-align:center}
+.kpi-val{font-size:22px;font-weight:800}
+.kpi-label{font-size:11px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.3px}
+
+/* Records */
+.record-list{max-height:400px;overflow-y:auto;margin-top:14px}
+.record-list::-webkit-scrollbar{width:4px}
+.record-list::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:4px}
+.record-item{padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;background:var(--card-inset)}
+.record-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.record-sku{font-weight:700;font-size:15px}
+.record-status{font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.5px}
+.s-local{background:var(--local-bg);color:var(--muted)}
+.s-synced{background:var(--success-bg);color:var(--success)}
+.s-failed{background:var(--danger-bg);color:var(--danger)}
+.s-uploading,.s-writing{background:var(--warning-bg);color:var(--warning)}
+.record-details{display:flex;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.record-details span{white-space:nowrap}
+.record-time{font-size:12px;color:var(--dim);margin-top:6px}
+.record-bottom{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
+.var-positive{color:var(--warning)}.var-negative{color:var(--danger)}.var-zero{color:var(--success)}
+.empty-state{text-align:center;padding:32px 16px;color:var(--dim)}
+.empty-state-icon{font-size:32px;margin-bottom:8px}
+.empty-state-text{font-size:14px}
+
+/* Edit button in records */
+.btn-edit{width:auto;min-height:32px;padding:6px 14px;font-size:12px;background:var(--secondary-bg);color:var(--text);border-radius:6px}
+.btn-edit:hover{background:var(--secondary-hover)}
+
+/* Edit banner */
+.edit-banner{background:var(--warning-bg);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
+.edit-banner span{color:var(--warning);font-weight:600;font-size:14px}
+.edit-banner button{width:auto;min-height:36px;padding:8px 14px;font-size:13px}
+
+/* Existing photo */
+.existing-photo-wrap{margin-top:12px}
+.existing-photo-label{font-size:12px;color:var(--muted);margin-bottom:6px}
+.existing-photo{width:100%;max-height:160px;object-fit:contain;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--input-bg);opacity:.85}
+
+/* Bottom bar */
+.bottom-bar{position:fixed;left:0;right:0;bottom:0;background:var(--bar-bg);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--border);padding:12px 16px;padding-bottom:max(12px,env(safe-area-inset-bottom));z-index:100;transition:background .25s}
+.bar-inner{max-width:640px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.bottom-bar button{min-height:50px;font-size:16px}
+
+/* Toast */
+#toasts{position:fixed;top:16px;right:16px;z-index:1000;display:flex;flex-direction:column;gap:8px;max-width:360px;pointer-events:none}
+@media(max-width:480px){#toasts{left:16px;right:16px;max-width:none}}
+.toast{padding:12px 16px;border-radius:var(--radius-sm);font-size:14px;font-weight:500;animation:slideIn .25s ease;border:1px solid var(--toast-border);pointer-events:auto}
+.toast-info{background:rgba(59,130,246,.92);color:#fff}
+.toast-success{background:rgba(34,197,94,.92);color:#fff}
+.toast-error{background:rgba(239,68,68,.92);color:#fff}
+.toast-warning{background:rgba(245,158,11,.92);color:#fff}
+.toast.fade-out{animation:fadeOut .3s ease forwards}
+@keyframes slideIn{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}
+@keyframes fadeOut{from{opacity:1}to{opacity:0;transform:translateY(-10px)}}
+
+/* Scanner */
+#reader{width:100%;border-radius:var(--radius-sm);overflow:hidden;margin:12px 0}
+.photo-preview{width:100%;max-height:200px;object-fit:contain;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--input-bg);margin-top:8px}
+.divider{height:1px;background:var(--border);margin:16px 0}
+
+/* Confirm modal */
+.modal-backdrop{position:fixed;inset:0;background:var(--modal-bg);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:200;padding:24px}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;max-width:360px;width:100%}
+.modal h3{font-size:18px;margin-bottom:8px}
+.modal p{color:var(--muted);font-size:14px;margin-bottom:20px}
+.modal .btn-row{margin-top:0}
+
+/* Last count info */
+.last-count-info{font-size:13px;color:var(--muted);padding:8px 12px;background:var(--kpi-bg);border:1px solid var(--border);border-radius:var(--radius-sm);margin-top:10px}
+.last-count-info strong{color:var(--text);font-weight:600}
+
+/* Inline actions */
+.inline-actions{display:flex;gap:8px;margin-top:10px}
+.inline-action-btn{width:auto;min-height:38px;padding:8px 14px;font-size:13px}
+
+/* Utility */
+.hidden{display:none!important}
+.mt-sm{margin-top:8px}
+.mt-md{margin-top:14px}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.21.0/lib/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+
+<div id="toasts"></div>
+
+<div class="wrap">
+  <header>
+    <div class="header-top">
+      <h1>Cycle Count</h1>
+      <button id="themeToggle" class="theme-toggle" title="Toggle theme">&#9728;&#65039;</button>
+    </div>
+    <div class="status-chips">
+      <span class="chip">Auth: <span id="chipAuth" class="chip-val bad">Signed out</span></span>
+      <span class="chip">Cache: <span id="chipCache" class="chip-val">0</span></span>
+      <span class="chip">Pending: <span id="chipQueue" class="chip-val">0</span></span>
+    </div>
+  </header>
+
+  <!-- Setup -->
+  <div class="card" id="setupCard">
+    <div class="setup-header" id="toggleSetup">
+      <span class="section-title" style="margin:0">Setup</span>
+      <span class="toggle-icon">&#9662;</span>
+    </div>
+    <div class="setup-body" id="setupBody">
+
+      <div class="setup-step">
+        <div class="step-num" id="step1Num">1</div>
+        <div class="step-content">
+          <div class="step-label">Sign in with Microsoft</div>
+          <button class="secondary" id="btnSignIn">Sign in</button>
+          <div class="step-status" id="step1Status"></div>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num" id="step2Num">2</div>
+        <div class="step-content">
+          <div class="step-label">Connect workbook</div>
+          <div class="field mt-sm">
+            <input id="shareLink" placeholder="Paste OneDrive share link">
+          </div>
+          <button class="secondary mt-sm" id="btnLoadWorkbook">Connect Workbook</button>
+          <div class="step-status" id="step2Status"></div>
+        </div>
+      </div>
+
+      <div class="setup-step">
+        <div class="step-num" id="step3Num">3</div>
+        <div class="step-content">
+          <div class="step-label">Load inventory cache</div>
+          <button class="secondary" id="btnRefreshInventory">Refresh SKU Cache</button>
+          <div class="step-status" id="step3Status"></div>
+        </div>
+      </div>
+
+      <!-- Device name auto-set from Microsoft account -->
+
+    </div>
+  </div>
+
+  <!-- Count Entry -->
+  <div class="card count-card">
+    <div class="section-title">Count Entry</div>
+
+    <!-- Edit mode banner (hidden by default) -->
+    <div id="editBanner" class="edit-banner hidden">
+      <span>Editing record</span>
+      <button class="secondary" id="btnCancelEdit">Cancel</button>
+    </div>
+
+    <div class="form-row cols-2">
+      <div class="field">
+        <label>Bin</label>
+        <input id="bin" placeholder="Scan or enter bin">
+      </div>
+      <div class="field">
+        <label>SKU</label>
+        <input id="sku" placeholder="Scan barcode or type">
+      </div>
+    </div>
+
+    <button class="secondary" id="btnToggleScan">Start Scanner</button>
+    <div id="reader" class="hidden"></div>
+
+    <div class="form-row cols-3 mt-md">
+      <div class="field">
+        <label>Expected Qty</label>
+        <input id="expectedQty" readonly placeholder="&#8212;">
+      </div>
+      <div class="field">
+        <label>SalesPad Qty</label>
+        <input id="salespadQty" readonly placeholder="&#8212;">
+      </div>
+      <div class="field">
+        <label>Counted Qty</label>
+        <input id="countedQty" inputmode="numeric" type="number" step="1" placeholder="0">
+      </div>
+    </div>
+
+    <div class="status-badges">
+      <span class="badge-pill">Lookup: <span id="lookupState" class="badge-val">&#8212;</span></span>
+      <span class="badge-pill">Bin: <span id="binState" class="badge-val">&#8212;</span></span>
+      <span class="badge-pill">Variance: <span id="varState" class="badge-val">&#8212;</span></span>
+    </div>
+
+    <!-- Last count info (shown when SKU has been counted before) -->
+    <div id="lastCountInfo" class="last-count-info hidden"></div>
+
+    <!-- Inline actions: add new SKU / move bin -->
+    <div id="inlineActions" class="inline-actions hidden">
+      <button class="secondary inline-action-btn" id="btnAddSku">&#10133; Add to Inventory</button>
+      <button class="secondary inline-action-btn" id="btnMoveBin">&#128230; Move Bin</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <input id="photo" type="file" accept="image/*" capture="environment" class="hidden">
+    <button class="secondary" id="btnPhoto">Take Photo</button>
+    <img id="photoPreview" class="photo-preview hidden" alt="Photo preview">
+
+    <!-- Existing photo from previous counts -->
+    <div id="existingPhotoWrap" class="existing-photo-wrap hidden">
+      <div id="existingPhotoLabel" class="existing-photo-label">Previous photo</div>
+      <img id="existingPhoto" class="existing-photo" alt="Previous photo">
+    </div>
+
+    <div class="field mt-md">
+      <label>Notes</label>
+      <textarea id="notes" placeholder="Optional"></textarea>
+    </div>
+  </div>
+
+  <!-- Records -->
+  <div class="card">
+    <div class="section-title">Records</div>
+
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-val" id="kpiTotal">0</div><div class="kpi-label">Total</div></div>
+      <div class="kpi"><div class="kpi-val" id="kpiPending">0</div><div class="kpi-label">Pending</div></div>
+      <div class="kpi"><div class="kpi-val" id="kpiMatched">0</div><div class="kpi-label">Matched</div></div>
+      <div class="kpi"><div class="kpi-val" id="kpiVariance">0</div><div class="kpi-label">Variance</div></div>
+    </div>
+
+    <button class="danger-outline" id="btnClearLocal" style="margin-top:14px">Clear All Local Records</button>
+
+    <div id="recordList"></div>
+  </div>
+</div>
+
+<!-- Bottom bar -->
+<div class="bottom-bar">
+  <div class="bar-inner">
+    <button class="success" id="barSave">Save Count</button>
+    <button class="secondary hidden" id="barCancelEdit2">Cancel</button>
+    <button id="barSync">Sync <span id="barSyncCount">(0)</span></button>
+  </div>
+</div>
+
+<!-- Confirm modal -->
+<div id="confirmModal" class="modal-backdrop hidden">
+  <div class="modal">
+    <h3 id="confirmTitle">Confirm</h3>
+    <p id="confirmMsg">Are you sure?</p>
+    <div class="btn-row cols-2">
+      <button class="secondary" id="confirmCancel">Cancel</button>
+      <button style="background:var(--danger)" id="confirmOk">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

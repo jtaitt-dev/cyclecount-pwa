@@ -1,0 +1,13 @@
+{
+  "name": "Cycle Count",
+  "short_name": "Cycle",
+  "display": "standalone",
+  "start_url": "./",
+  "scope": "./",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "icons": [
+    { "src": "icon.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
