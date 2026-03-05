@@ -59,15 +59,18 @@ const withLoading = (btn, fn, loadingText) => async () => {
   }
 }
 
-const showConfirm = (title, msg) => new Promise(resolve => {
+const showConfirm = (title, msg, okText = 'OK', okStyle = '') => new Promise(resolve => {
   $('confirmTitle').textContent = title
   $('confirmMsg').textContent = msg
+  const okBtn = $('confirmOk')
+  okBtn.textContent = okText
+  okBtn.style.background = okStyle || 'var(--primary)'
   $('confirmModal').classList.remove('hidden')
   const cleanup = result => {
     $('confirmModal').classList.add('hidden')
     resolve(result)
   }
-  $('confirmOk').onclick = () => cleanup(true)
+  okBtn.onclick = () => cleanup(true)
   $('confirmCancel').onclick = () => cleanup(false)
   $('confirmModal').onclick = e => {
     if (e.target === $('confirmModal')) cleanup(false)
@@ -83,6 +86,19 @@ const timeAgo = iso => {
 }
 
 const nowIso = () => new Date().toISOString()
+
+const formatDateLocal = iso => {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  let h = d.getHours()
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  h = h % 12 || 12
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return mm + '-' + dd + '-' + yyyy + ' ' + h + ':' + min + ' ' + ampm
+}
 
 // === Theme ===
 const applyTheme = (theme) => {
@@ -245,7 +261,7 @@ const ensureOnHandColumns = async () => {
   const hdrRange = await graphSafe('GET', wbUrl() + '/tables/OnHand/headerRowRange')
   if (!hdrRange) return
   const headers = (hdrRange.values?.[0] || []).map(h => (h ?? '').toString().trim())
-  const needed = ['SalesPadQty', 'LastCountedQty', 'LastCountDate']
+  const needed = ['SalesPadQty', 'LastCountedQty', 'LastCountDate', 'LastCountedBy']
   const missing = needed.filter(n => !headers.includes(n))
   if (missing.length === 0) return
 
@@ -274,8 +290,9 @@ const loadInventoryCache = async () => {
     const salespadQty = (v[3] !== undefined && v[3] !== null && v[3] !== '') ? Number(v[3]) : null
     const lastCountedQty = (v[4] !== undefined && v[4] !== null && v[4] !== '') ? Number(v[4]) : null
     const lastCountDate = (v[5] ?? '').toString().trim() || null
+    const lastCountedBy = (v[6] ?? '').toString().trim() || null
     if (!sku) continue
-    inventoryCache.set(sku, { bin, expectedQty: exp, salespadQty, lastCountedQty, lastCountDate })
+    inventoryCache.set(sku, { bin, expectedQty: exp, salespadQty, lastCountedQty, lastCountDate, lastCountedBy })
     ok++
   }
   setBadge('chipCache', ok + ' SKUs', 'good')
@@ -296,7 +313,8 @@ const updateOnHandRow = async (sku, countedQty, timestamp) => {
   const headers = (hdrRange.values?.[0] || []).map(h => (h ?? '').toString().trim())
   const colLastCounted = headers.indexOf('LastCountedQty')
   const colLastDate = headers.indexOf('LastCountDate')
-  if (colLastCounted < 0 && colLastDate < 0) return
+  const colLastBy = headers.indexOf('LastCountedBy')
+  if (colLastCounted < 0 && colLastDate < 0 && colLastBy < 0) return
 
   const rows = await graph('GET', wbUrl() + '/tables/OnHand/rows?$top=100000')
   const allRows = rows.value || []
@@ -308,9 +326,11 @@ const updateOnHandRow = async (sku, countedQty, timestamp) => {
   if (matchIdx < 0) return
 
   const existing = allRows[matchIdx].values[0].slice()
-  while (existing.length <= Math.max(colLastCounted, colLastDate)) existing.push('')
+  const maxCol = Math.max(colLastCounted, colLastDate, colLastBy)
+  while (existing.length <= maxCol) existing.push('')
   if (colLastCounted >= 0) existing[colLastCounted] = countedQty
-  if (colLastDate >= 0) existing[colLastDate] = timestamp
+  if (colLastDate >= 0) existing[colLastDate] = formatDateLocal(timestamp)
+  if (colLastBy >= 0) existing[colLastBy] = account?.name || account?.username || 'Unknown'
 
   await graph('PATCH', wbUrl() + '/tables/OnHand/rows/itemAt(index=' + matchIdx + ')', {
     values: [existing]
@@ -331,18 +351,19 @@ const addSkuToInventory = async () => {
 
   const ok = await showConfirm(
     'Add SKU to Inventory?',
-    'Add "' + sku + '" to OnHand table with Bin: ' + (bin || '—') + ', Expected Qty: ' + expectedQty + '?'
+    'Add "' + sku + '" to OnHand table with Bin: ' + (bin || '—') + ', Expected Qty: ' + expectedQty + '?',
+    'Confirm'
   )
   if (!ok) return
 
   try {
     await graph('POST', wbUrl() + '/tables/OnHand/rows/add', {
-      values: [[sku, bin, expectedQty, '', '', '']]
+      values: [[sku, bin, expectedQty, '', '', '', '']]
     })
 
     // Update local cache
     inventoryCache.set(sku, {
-      bin, expectedQty, salespadQty: null, lastCountedQty: null, lastCountDate: null
+      bin, expectedQty, salespadQty: null, lastCountedQty: null, lastCountDate: null, lastCountedBy: null
     })
     setBadge('chipCache', inventoryCache.size + ' SKUs', 'good')
     toast('SKU "' + sku + '" added to inventory', 'success')
@@ -423,20 +444,29 @@ const lookupExistingPhoto = async (sku) => {
     return
   }
 
-  // 1. Check local records first (works offline)
+  // Error handler — hide gracefully if image fails to load
+  img.onerror = () => {
+    label.textContent = 'Previous photo unavailable'
+    img.classList.add('hidden')
+    wrap.classList.remove('hidden')
+  }
+  img.onload = () => {
+    img.classList.remove('hidden')
+  }
+
+  // 1. Check local records first (works offline — base64 data URLs never expire)
   const rows = db.get()
   const localMatch = [...rows].reverse().find(r =>
-    r.SKU === sku && (r._photoLocal || r.PhotoUrl)
+    r.SKU === sku && r._photoLocal
   )
   if (localMatch) {
-    const src = localMatch._photoLocal || localMatch.PhotoUrl
-    img.src = src
+    img.src = localMatch._photoLocal
     label.textContent = 'Previous photo \u00b7 ' + timeAgo(localMatch.Timestamp)
     wrap.classList.remove('hidden')
     return
   }
 
-  // 2. Fallback: search OneDrive CycleCountPhotos folder
+  // 2. Fallback: search OneDrive CycleCountPhotos folder (fresh download URLs)
   if (!accessToken) {
     wrap.classList.add('hidden')
     return
@@ -447,7 +477,6 @@ const lookupExistingPhoto = async (sku) => {
     if (folder?.value?.length > 0) {
       const match = folder.value.find(f => f.name.startsWith(safeSku + '_'))
       if (match) {
-        // Use the pre-authenticated download URL (fast, no extra API call)
         const imgUrl = match['@microsoft.graph.downloadUrl']
         if (imgUrl) {
           img.src = imgUrl
@@ -471,8 +500,18 @@ const debouncedPhotoLookup = (sku) => {
 
 // === Excel Write ===
 const addRowToExcel = async row => {
-  const payload = { values: [[row.Timestamp, row.SKU, row.Bin, row.ExpectedQty, row.CountedQty, row.Variance, row.PhotoUrl, row.Device, row.Notes]] }
-  await graph('POST', wbUrl() + '/tables/CycleCounts/rows/add', payload)
+  const photoCell = row.PhotoUrl
+    ? '=HYPERLINK("' + row.PhotoUrl.replaceAll('"', '""') + '","\uD83D\uDCF7 View Photo")'
+    : ''
+  // Use formulas array when we have a HYPERLINK formula, values array otherwise
+  if (row.PhotoUrl) {
+    const formulas = [[row.Timestamp, row.SKU, row.Bin, row.ExpectedQty, row.CountedQty, row.Variance, photoCell, row.Device, row.Notes]]
+    await graph('POST', wbUrl() + '/tables/CycleCounts/rows/add', { values: formulas })
+  } else {
+    await graph('POST', wbUrl() + '/tables/CycleCounts/rows/add', {
+      values: [[row.Timestamp, row.SKU, row.Bin, row.ExpectedQty, row.CountedQty, row.Variance, '', row.Device, row.Notes]]
+    })
+  }
 }
 
 // === Validate & Compute ===
@@ -511,7 +550,9 @@ const validateAndCompute = () => {
     // Show last count info
     if (lastCountEl) {
       if (hit.lastCountedQty !== null && hit.lastCountDate) {
-        lastCountEl.innerHTML = 'Last counted: <strong>' + hit.lastCountedQty + ' units</strong> \u00b7 ' + timeAgo(hit.lastCountDate)
+        let info = 'Last counted: <strong>' + hit.lastCountedQty + ' units</strong> \u00b7 ' + timeAgo(hit.lastCountDate)
+        if (hit.lastCountedBy) info += ' by ' + hit.lastCountedBy
+        lastCountEl.innerHTML = info
         lastCountEl.classList.remove('hidden')
       } else {
         lastCountEl.classList.add('hidden')
@@ -701,9 +742,12 @@ const startScan = async () => {
     { facingMode: 'environment' },
     { fps: 12, qrbox: { width: 260, height: 170 }, experimentalFeatures: { useBarCodeDetectorIfSupported: true } },
     text => {
-      $('sku').value = text.trim()
-      toast('Scanned: ' + text.trim(), 'success')
+      const target = document.querySelector('input[name="scanTarget"]:checked')?.value || 'sku'
+      $(target).value = text.trim()
+      toast('Scanned ' + target.toUpperCase() + ': ' + text.trim(), 'success')
       validateAndCompute()
+      // Auto-close camera after successful scan
+      stopScan()
     },
     () => {}
   )
@@ -846,13 +890,14 @@ const syncNow = async () => {
   }
   toast(synced + ' record(s) synced', 'success')
 
-  // Auto-refresh KPI sheet after sync
-  try {
-    toast('Updating KPI sheet...', 'info')
-    await refreshKPIs()
-  } catch (e) {
-    console.warn('KPI refresh failed:', e.message)
-  }
+  // Auto-refresh KPI sheet in background (non-blocking)
+  toast('KPI sheet updating in background...', 'info')
+  refreshKPIs()
+    .then(() => toast('KPI sheet updated', 'success'))
+    .catch(e => {
+      console.warn('KPI refresh failed:', e.message)
+      toast('KPI update failed — try syncing again', 'warning')
+    })
 }
 
 // =========================================================
@@ -1064,7 +1109,7 @@ const clearLocal = async () => {
     toast('Already empty', 'info')
     return
   }
-  const ok = await showConfirm('Clear all records?', 'This will delete ' + rows.length + ' local record(s). This cannot be undone.')
+  const ok = await showConfirm('Clear all records?', 'This will delete ' + rows.length + ' local record(s). This cannot be undone.', 'Delete', 'var(--danger)')
   if (!ok) return
   if (editingIndex >= 0) cancelEdit()
   db.set([])
@@ -1210,6 +1255,14 @@ const wire = async () => {
   const prevLink = localStorage.getItem('shareLink') || ''
   if (prevLink) $('shareLink').value = prevLink
   $('shareLink').addEventListener('input', () => localStorage.setItem('shareLink', $('shareLink').value))
+
+  // Scan target persistence
+  const savedScanTarget = localStorage.getItem('scanTarget') || 'sku'
+  const radio = document.querySelector('input[name="scanTarget"][value="' + savedScanTarget + '"]')
+  if (radio) radio.checked = true
+  document.querySelectorAll('input[name="scanTarget"]').forEach(r => {
+    r.addEventListener('change', () => localStorage.setItem('scanTarget', r.value))
+  })
 
   console.log('Cycle Count ready')
 }
