@@ -119,7 +119,7 @@ const toggleTheme = () => {
 const CFG = {
   clientId: '5591a292-6fe4-4ddd-9754-4b55efbce9be',
   authority: 'https://login.microsoftonline.com/common',
-  scopes: ['User.Read', 'Files.ReadWrite', 'offline_access']
+  scopes: ['User.Read', 'Files.ReadWrite.All', 'offline_access']
 }
 
 // === State ===
