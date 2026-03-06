@@ -466,25 +466,40 @@ const lookupExistingPhoto = async (sku) => {
     return
   }
 
-  // 2. Fallback: search OneDrive CycleCountPhotos folder (fresh download URLs)
-  if (!accessToken) {
+  // 2. Fallback: search shared CycleCounts table for any user's photo of this SKU
+  if (!accessToken || !driveId || !itemId) {
     wrap.classList.add('hidden')
     return
   }
   try {
-    const safeSku = sku.replaceAll('/', '_').replaceAll('\\', '_').replaceAll(' ', '_')
-    const folder = await graphSafe('GET', '/me/drive/root:/CycleCountPhotos:/children?$orderby=lastModifiedDateTime desc&$top=50')
-    if (folder?.value?.length > 0) {
-      const match = folder.value.find(f => f.name.startsWith(safeSku + '_'))
-      if (match) {
-        const imgUrl = match['@microsoft.graph.downloadUrl']
-        if (imgUrl) {
-          img.src = imgUrl
-          const modified = match.lastModifiedDateTime ? timeAgo(match.lastModifiedDateTime) : ''
-          label.textContent = 'Previous photo' + (modified ? ' \u00b7 ' + modified : '')
-          wrap.classList.remove('hidden')
-          return
-        }
+    // CycleCounts columns: [0:Timestamp, 1:SKU, 2:Bin, 3:ExpectedQty, 4:CountedQty, 5:Variance, 6:PhotoUrl, 7:Device, 8:Notes]
+    const range = await graphSafe('GET', wbUrl() + '/tables/CycleCounts/dataBodyRange')
+    if (!range) { wrap.classList.add('hidden'); return }
+    const formulas = range.formulas || []
+    const values = range.values || []
+    const len = formulas.length || values.length
+    // Search from bottom (most recent) for matching SKU with a photo
+    for (let i = len - 1; i >= 0; i--) {
+      const rowSku = ((values[i] || [])[1] ?? '').toString().trim()
+      if (rowSku !== sku) continue
+      // Extract photo URL from HYPERLINK formula or plain value
+      const formula = ((formulas[i] || [])[6] ?? '').toString().trim()
+      const value = ((values[i] || [])[6] ?? '').toString().trim()
+      let photoShareUrl = ''
+      const m = formula.match(/HYPERLINK\s*\(\s*"([^"]+)"/)
+      if (m) photoShareUrl = m[1]
+      if (!photoShareUrl && value.startsWith('http')) photoShareUrl = value
+      if (!photoShareUrl) continue
+      // Resolve anonymous share link to a direct download URL
+      const sid = shareIdFromLink(photoShareUrl)
+      const item = await graphSafe('GET', '/shares/' + sid + '/driveItem')
+      const dlUrl = item?.['@microsoft.graph.downloadUrl']
+      if (dlUrl) {
+        img.src = dlUrl
+        const ts = ((values[i] || [])[0] ?? '').toString().trim()
+        label.textContent = 'Previous photo' + (ts ? ' \u00b7 ' + timeAgo(ts) : '')
+        wrap.classList.remove('hidden')
+        return
       }
     }
   } catch (e) {
