@@ -916,23 +916,27 @@ const syncNow = async () => {
 }
 
 // =========================================================
-// FEATURE 5: KPI sheet with 5 charts
+// FEATURE 5: KPI Dashboard — organized layout with cell-anchored charts
 // =========================================================
 const refreshKPIs = async () => {
   if (!driveId || !itemId) await resolveWorkbook()
 
   // 1. Delete existing KPI sheet (if exists)
-  try {
-    await graph('DELETE', wbUrl() + '/worksheets/KPI')
-  } catch (e) { /* sheet doesn't exist — fine */ }
+  try { await graph('DELETE', wbUrl() + '/worksheets/KPI') } catch (e) { /* fine */ }
 
   // 2. Create fresh KPI sheet
   await graph('POST', wbUrl() + '/worksheets', { name: 'KPI' })
-
   const kpiBase = wbUrl() + '/worksheets/KPI'
 
-  // ---- SECTION A: Summary metrics (A1:B11) ----
-  const summaryFormulas = [
+  // ==========================================================
+  //  DATA TABLES — all in columns A–B, stacked vertically
+  // ==========================================================
+
+  // Row 1: Dashboard title
+  await graph('PATCH', kpiBase + "/range(address='A1')", { values: [['CYCLE COUNT KPI DASHBOARD']] })
+
+  // Rows 3–13: Summary Scorecard
+  await graph('PATCH', kpiBase + "/range(address='A3:B13')", { formulas: [
     ['Metric', 'Value'],
     ['Total SKUs', '=ROWS(OnHand[SKU])'],
     ['SKUs Counted', '=COUNTA(OnHand[LastCountedQty])'],
@@ -944,38 +948,33 @@ const refreshKPIs = async () => {
     ['Negative Variance', '=COUNTIF(CycleCounts[Variance],"<"&0)'],
     ['Avg Abs Variance', '=IF(ROWS(CycleCounts[SKU])=0,0,ROUND(SUMPRODUCT(ABS(CycleCounts[Variance]))/ROWS(CycleCounts[SKU]),2))'],
     ['Devices Used', '=ROWS(UNIQUE(CycleCounts[Device]))']
-  ]
-  await graph('PATCH', kpiBase + "/range(address='A1:B11')", { formulas: summaryFormulas })
+  ]})
 
-  // ---- SECTION B: Variance Distribution (D1:E6) → ColumnClustered ----
-  const varianceData = [
+  // Rows 15–20: Variance Distribution (chart source)
+  await graph('PATCH', kpiBase + "/range(address='A15:B20')", { formulas: [
     ['Variance Range', 'Count'],
     ['Zero (Perfect)', '=COUNTIF(CycleCounts[Variance],0)'],
     ['+1 to +5', '=COUNTIFS(CycleCounts[Variance],">"&0,CycleCounts[Variance],"<="&5)'],
     ['+6 or more', '=COUNTIF(CycleCounts[Variance],">"&5)'],
     ['-1 to -5', '=COUNTIFS(CycleCounts[Variance],"<"&0,CycleCounts[Variance],">="&-5)'],
     ['-6 or less', '=COUNTIF(CycleCounts[Variance],"<"&-5)']
-  ]
-  await graph('PATCH', kpiBase + "/range(address='D1:E6')", { formulas: varianceData })
+  ]})
 
-  // ---- SECTION C: Accuracy Breakdown (D9:E10) → Pie ----
-  const accuracyData = [
+  // Rows 22–24: Count Accuracy (chart source)
+  await graph('PATCH', kpiBase + "/range(address='A22:B24')", { formulas: [
     ['Category', 'Count'],
     ['Perfect (0 Variance)', '=COUNTIF(CycleCounts[Variance],0)'],
     ['Imperfect (Non-zero)', '=COUNTIF(CycleCounts[Variance],"<>"&0)']
-  ]
-  await graph('PATCH', kpiBase + "/range(address='D9:E11')", { formulas: accuracyData })
+  ]})
 
-  // ---- SECTION D: Coverage Breakdown (D14:E15) → Pie ----
-  const coverageData = [
+  // Rows 26–28: SKU Coverage (chart source)
+  await graph('PATCH', kpiBase + "/range(address='A26:B28')", { formulas: [
     ['Status', 'Count'],
     ['Counted', '=COUNTA(OnHand[LastCountedQty])'],
     ['Not Counted', '=ROWS(OnHand[SKU])-COUNTA(OnHand[LastCountedQty])']
-  ]
-  await graph('PATCH', kpiBase + "/range(address='D14:E16')", { formulas: coverageData })
+  ]})
 
-  // ---- SECTION E: Counts by Device (computed values in G1:H?) ----
-  // Use local synced data since UNIQUE() + COUNTIF by device is tricky cross-table
+  // Rows 30+: Counts by Device (computed values)
   const rows = db.get().filter(r => r._status === 'SYNCED')
   const deviceMap = new Map()
   for (const r of rows) {
@@ -985,12 +984,10 @@ const refreshKPIs = async () => {
   const deviceEntries = [...deviceMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
   if (deviceEntries.length === 0) deviceEntries.push(['No Data', 0])
   const deviceGrid = [['Device', 'Counts'], ...deviceEntries]
-  const deviceEndRow = 1 + deviceEntries.length
-  await graph('PATCH', kpiBase + "/range(address='G1:H" + deviceEndRow + "')", {
-    values: deviceGrid
-  })
+  const deviceEndRow = 30 + deviceEntries.length
+  await graph('PATCH', kpiBase + "/range(address='A30:B" + deviceEndRow + "')", { values: deviceGrid })
 
-  // ---- SECTION F: Top 10 Variance SKUs (computed in G' + offset) ----
+  // Rows ?+: Top 10 Variance SKUs (computed values)
   const topVarOffset = deviceEndRow + 2
   const allCounts = db.get()
   const skuVarMap = new Map()
@@ -1005,114 +1002,68 @@ const refreshKPIs = async () => {
   if (topVar.length === 0) topVar.push(['No Variance', 0])
   const topVarGrid = [['SKU', 'Abs Variance'], ...topVar]
   const topVarEndRow = topVarOffset + topVar.length
-  await graph('PATCH', kpiBase + "/range(address='G" + topVarOffset + ":H" + topVarEndRow + "')", {
-    values: topVarGrid
-  })
+  await graph('PATCH', kpiBase + "/range(address='A" + topVarOffset + ":B" + topVarEndRow + "')", { values: topVarGrid })
 
-  // ---- Format headers bold ----
+  // ==========================================================
+  //  FORMATTING
+  // ==========================================================
   try {
-    await graph('PATCH', kpiBase + "/range(address='A1:B1')/format/font", { bold: true })
-    await graph('PATCH', kpiBase + "/range(address='D1:E1')/format/font", { bold: true })
-    await graph('PATCH', kpiBase + "/range(address='D9:E9')/format/font", { bold: true })
-    await graph('PATCH', kpiBase + "/range(address='D14:E14')/format/font", { bold: true })
-    await graph('PATCH', kpiBase + "/range(address='G1:H1')/format/font", { bold: true })
-    await graph('PATCH', kpiBase + "/range(address='G" + topVarOffset + ":H" + topVarOffset + "')/format/font", { bold: true })
+    // Dashboard title
+    await graph('PATCH', kpiBase + "/range(address='A1')/format/font", { bold: true, size: 16 })
+    // Section headers bold
+    await graph('PATCH', kpiBase + "/range(address='A3:B3')/format/font", { bold: true })
+    await graph('PATCH', kpiBase + "/range(address='A15:B15')/format/font", { bold: true })
+    await graph('PATCH', kpiBase + "/range(address='A22:B22')/format/font", { bold: true })
+    await graph('PATCH', kpiBase + "/range(address='A26:B26')/format/font", { bold: true })
+    await graph('PATCH', kpiBase + "/range(address='A30:B30')/format/font", { bold: true })
+    await graph('PATCH', kpiBase + "/range(address='A" + topVarOffset + ":B" + topVarOffset + "')/format/font", { bold: true })
+    // Auto-fit data columns
+    await graph('POST', kpiBase + "/range(address='A:B')/format/autofitColumns", {})
   } catch (e) {
-    console.warn('Header formatting failed:', e.message)
+    console.warn('Formatting failed:', e.message)
   }
 
-  // ---- SECTION G: Chart Descriptions (A13:B35) ----
-  const descRows = [
-    ['', ''],
-    ['CHART GUIDE', ''],
-    ['', ''],
-    ['📊 Variance Distribution', ''],
-    ['', 'Shows how count variances are spread across ranges. "Zero" means the physical count matched'],
-    ['', 'the expected quantity exactly. Positive means you found MORE than expected; negative means LESS.'],
-    ['', 'Ideally the "Zero (Perfect)" bar should be the tallest. Large bars on +6/−6 indicate systemic issues.'],
-    ['', ''],
-    ['🎯 Count Accuracy', ''],
-    ['', 'Pie chart showing the ratio of perfect counts (zero variance) vs imperfect counts.'],
-    ['', 'Target: 95%+ accuracy. If the "Imperfect" slice is large, investigate top-variance SKUs below.'],
-    ['', ''],
-    ['📦 SKU Coverage', ''],
-    ['', 'Pie chart showing how many of your inventory SKUs have been cycle-counted at least once.'],
-    ['', 'Target: 100% coverage over the count cycle. A large "Not Counted" slice means more SKUs need attention.'],
-    ['', ''],
-    ['👥 Counts by Device', ''],
-    ['', 'Bar chart showing how many counts each team member (device) has submitted.'],
-    ['', 'Use this to balance workload across counters and identify top contributors.'],
-    ['', ''],
-    ['⚠️ Top Variance SKUs', ''],
-    ['', 'Horizontal bar chart of the 10 SKUs with the largest absolute variance.'],
-    ['', 'These are your problem SKUs — investigate for misplacement, theft, receiving errors, or bad bin locations.'],
-    ['', 'Recount these SKUs first to confirm or correct the discrepancy.']
-  ]
-  const descEndRow = 12 + descRows.length
-  await graph('PATCH', kpiBase + "/range(address='A13:B" + descEndRow + "')", { values: descRows })
-
-  // Format chart guide header
-  try {
-    await graph('PATCH', kpiBase + "/range(address='A14:B14')/format/font", { bold: true, size: 14 })
-    // Format each chart title row bold
-    await graph('PATCH', kpiBase + "/range(address='A16:A16')/format/font", { bold: true })
-    await graph('PATCH', kpiBase + "/range(address='A21:A21')/format/font", { bold: true })
-    await graph('PATCH', kpiBase + "/range(address='A25:A25')/format/font", { bold: true })
-    await graph('PATCH', kpiBase + "/range(address='A29:A29')/format/font", { bold: true })
-    await graph('PATCH', kpiBase + "/range(address='A33:A33')/format/font", { bold: true })
-    // Make description text italic and gray
-    await graph('PATCH', kpiBase + "/range(address='B17:B19')/format/font", { italic: true, color: '#666666' })
-    await graph('PATCH', kpiBase + "/range(address='B22:B23')/format/font", { italic: true, color: '#666666' })
-    await graph('PATCH', kpiBase + "/range(address='B26:B27')/format/font", { italic: true, color: '#666666' })
-    await graph('PATCH', kpiBase + "/range(address='B30:B30')/format/font", { italic: true, color: '#666666' })
-    await graph('PATCH', kpiBase + "/range(address='B34:B36')/format/font", { italic: true, color: '#666666' })
-  } catch (e) {
-    console.warn('Description formatting failed:', e.message)
-  }
-
-  // ---- Auto-fit columns ----
-  try {
-    await graph('POST', kpiBase + "/range(address='A:H')/format/autofitColumns", {})
-  } catch (e) {
-    console.warn('AutofitColumns failed:', e.message)
-  }
-
-  // ---- Create Charts ----
-  // Helper: create chart, set position, then set title (separate API calls)
+  // ==========================================================
+  //  CHARTS — cell-anchored via setPosition (locked in place)
+  //
+  //  Layout grid:
+  //  ┌──────────────────┬──────────────────┐
+  //  │ Variance Dist.   │ Count Accuracy   │  D2 → J16 / L2 → R16
+  //  ├──────────────────┼──────────────────┤
+  //  │ SKU Coverage     │ Counts by Device │  D18 → J32 / L18 → R32
+  //  ├──────────────────┴──────────────────┤
+  //  │      Top Variance SKUs              │  D34 → R49
+  //  └─────────────────────────────────────┘
+  // ==========================================================
   const chartsBase = kpiBase + '/charts'
   let chartCount = 0
 
-  const createChart = async (type, sourceData, titleText, h, w, t, l) => {
-    const c = await graph('POST', chartsBase + '/add', { type, sourceData, seriesBy: 'Columns' })
-    if (c?.name) {
-      const chartPath = chartsBase + "('" + c.name + "')"
-      // Position & size (direct properties)
-      await graphSafe('PATCH', chartPath, { height: h, width: w, top: t, left: l })
-      // Title (navigation property — separate endpoint)
-      await graphSafe('PATCH', chartPath + '/title', { text: titleText, visible: true })
+  const createChart = async (type, sourceData, titleText, startCell, endCell) => {
+    try {
+      const c = await graph('POST', chartsBase + '/add', { type, sourceData, seriesBy: 'Columns' })
+      if (c?.name) {
+        const chartPath = chartsBase + "('" + c.name + "')"
+        // Anchor chart to cell range (stays in place on scroll/resize)
+        await graphSafe('POST', chartPath + '/setPosition', { startCell, endCell })
+        // Set title
+        await graphSafe('PATCH', chartPath + '/title', { text: titleText, visible: true })
+        chartCount++
+      }
+    } catch (e) {
+      console.warn(titleText + ' chart failed:', e.message)
     }
-    chartCount++
   }
 
-  // Chart 1: Variance Distribution
-  try { await createChart('ColumnClustered', 'KPI!D1:E6', 'Variance Distribution', 280, 420, 0, 550) }
-  catch (e) { console.warn('Variance chart failed:', e.message) }
+  // Row 1: Variance Distribution (column) + Count Accuracy (pie)
+  await createChart('ColumnClustered', 'KPI!A15:B20', 'Variance Distribution', 'D2', 'J16')
+  await createChart('Pie', 'KPI!A22:B24', 'Count Accuracy', 'L2', 'R16')
 
-  // Chart 2: Accuracy Pie
-  try { await createChart('Pie', 'KPI!D9:E11', 'Count Accuracy', 280, 420, 300, 550) }
-  catch (e) { console.warn('Accuracy chart failed:', e.message) }
+  // Row 2: SKU Coverage (pie) + Counts by Device (column)
+  await createChart('Pie', 'KPI!A26:B28', 'SKU Coverage', 'D18', 'J32')
+  await createChart('ColumnClustered', 'KPI!A30:B' + deviceEndRow, 'Counts by Device', 'L18', 'R32')
 
-  // Chart 3: Coverage Pie
-  try { await createChart('Pie', 'KPI!D14:E16', 'SKU Coverage', 280, 420, 600, 550) }
-  catch (e) { console.warn('Coverage chart failed:', e.message) }
-
-  // Chart 4: Counts by Device
-  try { await createChart('ColumnClustered', 'KPI!G1:H' + deviceEndRow, 'Counts by Device', 280, 420, 0, 1000) }
-  catch (e) { console.warn('Device chart failed:', e.message) }
-
-  // Chart 5: Top Variance SKUs (horizontal bar)
-  try { await createChart('BarClustered', 'KPI!G' + topVarOffset + ':H' + topVarEndRow, 'Top Variance SKUs', 280, 420, 300, 1000) }
-  catch (e) { console.warn('Top variance chart failed:', e.message) }
+  // Row 3: Top Variance SKUs (horizontal bar, full width)
+  await createChart('BarClustered', 'KPI!A' + topVarOffset + ':B' + topVarEndRow, 'Top Variance SKUs', 'D34', 'R49')
 
   toast('KPI sheet refreshed — ' + chartCount + ' chart(s) created', 'success')
 }
