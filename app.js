@@ -987,11 +987,18 @@ const refreshKPIs = async () => {
     ['Not Counted', '=ROWS(OnHand[SKU])-COUNTA(OnHand[LastCountedQty])']
   ]})
 
-  // Rows 30+: Counts by Device (computed values)
-  const rows = db.get().filter(r => r._status === 'SYNCED')
+  // Read all CycleCounts rows from Excel (source of truth for device + variance data)
+  // Columns: [0:Timestamp, 1:SKU, 2:Bin, 3:ExpectedQty, 4:CountedQty, 5:Variance, 6:PhotoUrl, 7:Device, 8:Notes]
+  let excelRows = []
+  try {
+    const range = await graphSafe('GET', wbUrl() + '/tables/CycleCounts/dataBodyRange')
+    excelRows = range?.values || []
+  } catch (e) { console.warn('CycleCounts read failed:', e.message) }
+
+  // Rows 30+: Counts by Device (from Excel)
   const deviceMap = new Map()
-  for (const r of rows) {
-    const d = r.Device || 'Unknown'
+  for (const r of excelRows) {
+    const d = (r[7] ?? '').toString().trim() || 'Unknown'
     deviceMap.set(d, (deviceMap.get(d) || 0) + 1)
   }
   const deviceEntries = [...deviceMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
@@ -1000,15 +1007,15 @@ const refreshKPIs = async () => {
   const deviceEndRow = 30 + deviceEntries.length
   await graph('PATCH', kpiBase + "/range(address='A30:B" + deviceEndRow + "')", { values: deviceGrid })
 
-  // Rows ?+: Top 10 Variance SKUs (computed values)
+  // Rows ?+: Top 10 Variance SKUs (from Excel)
   const topVarOffset = deviceEndRow + 2
-  const allCounts = db.get()
   const skuVarMap = new Map()
-  for (const r of allCounts) {
-    const absVar = Math.abs(Number(r.Variance || 0))
-    if (absVar > 0) {
-      const existing = skuVarMap.get(r.SKU) || 0
-      if (absVar > existing) skuVarMap.set(r.SKU, absVar)
+  for (const r of excelRows) {
+    const sku = (r[1] ?? '').toString().trim()
+    const absVar = Math.abs(Number(r[5] || 0))
+    if (sku && absVar > 0) {
+      const existing = skuVarMap.get(sku) || 0
+      if (absVar > existing) skuVarMap.set(sku, absVar)
     }
   }
   const topVar = [...skuVarMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
