@@ -147,6 +147,8 @@ let scanning = false
 let setupCollapsed = false
 let editingIndex = -1
 let photoLookupTimer = null
+let syncInProgress = false
+let kpiInProgress = false
 
 const DBK = 'cycleCounts.v1'
 const db = {
@@ -224,14 +226,32 @@ const ensureToken = async () => {
   }
 }
 
-// === Graph API ===
+// === Graph API (with retry for concurrent-access errors) ===
+const graphRetry = async (fetchFn, maxRetries = 3) => {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const r = await fetchFn()
+    // 409=Conflict, 429=RateLimit, 503=ServerBusy — retry with backoff
+    if ((r.status === 409 || r.status === 429 || r.status === 503) && attempt < maxRetries) {
+      const retryAfter = r.headers.get('Retry-After')
+      const delay = retryAfter ? parseInt(retryAfter) * 1000 : Math.min(1000 * Math.pow(2, attempt), 8000)
+      console.warn('Graph ' + r.status + ' — retry ' + (attempt + 1) + ' in ' + delay + 'ms')
+      await new Promise(resolve => setTimeout(resolve, delay))
+      await ensureToken()
+      continue
+    }
+    return r
+  }
+}
+
 const graph = async (method, url, body) => {
   if (!accessToken) await ensureToken()
-  const h = { 'Authorization': 'Bearer ' + accessToken }
-  if (body) h['Content-Type'] = 'application/json'
-  const r = await fetch('https://graph.microsoft.com/v1.0' + url, {
-    method, headers: h,
-    body: body ? JSON.stringify(body) : undefined
+  const r = await graphRetry(() => {
+    const h = { 'Authorization': 'Bearer ' + accessToken }
+    if (body) h['Content-Type'] = 'application/json'
+    return fetch('https://graph.microsoft.com/v1.0' + url, {
+      method, headers: h,
+      body: body ? JSON.stringify(body) : undefined
+    })
   })
   const t = await r.text()
   if (!r.ok) throw new Error('Graph ' + r.status + ': ' + t.substring(0, 200))
@@ -240,8 +260,10 @@ const graph = async (method, url, body) => {
 
 const graphRaw = async (method, url, headers, body) => {
   if (!accessToken) await ensureToken()
-  const h = { 'Authorization': 'Bearer ' + accessToken, ...(headers || {}) }
-  const r = await fetch('https://graph.microsoft.com/v1.0' + url, { method, headers: h, body })
+  const r = await graphRetry(() => {
+    const h = { 'Authorization': 'Bearer ' + accessToken, ...(headers || {}) }
+    return fetch('https://graph.microsoft.com/v1.0' + url, { method, headers: h, body })
+  })
   const t = await r.text()
   if (!r.ok) throw new Error('Graph ' + r.status + ': ' + t.substring(0, 200))
   return t ? JSON.parse(t) : {}
@@ -872,66 +894,89 @@ const saveLocal = async () => {
 
 // === Sync (with OnHand update) ===
 const syncNow = async () => {
-  const rows = db.get()
-  const pending = rows.filter(r => r._status !== 'SYNCED')
-  if (!pending.length) {
-    toast('Nothing to sync', 'info')
-    return
-  }
-  if (!driveId || !itemId) await resolveWorkbook()
-
-  let synced = 0
-  for (const r of pending) {
-    try {
-      r._status = 'UPLOADING'
-      db.set(rows); render()
-
-      let photoUrl = ''
-      if (r._photoLocal) {
-        const blob = dataUrlToBlob(r._photoLocal)
-        const file = new File([blob], 'photo.jpg', { type: blob.type || 'image/jpeg' })
-        photoUrl = await uploadPhotoToOneDrive(file, r.SKU)
-      }
-      r.PhotoUrl = photoUrl
-      r._status = 'WRITING'
-      db.set(rows); render()
-
-      await addRowToExcel(r)
-
-      // Feature 4: Update OnHand row with last counted qty + timestamp
-      try {
-        await updateOnHandRow(r.SKU, r.CountedQty, r.Timestamp)
-      } catch (e) {
-        console.warn('OnHand update failed for ' + r.SKU + ':', e.message)
-      }
-
-      r._status = 'SYNCED'
-      r._photoLocal = ''
-      db.set(rows); render()
-      synced++
-    } catch (e) {
-      r._status = 'FAILED'
-      db.set(rows); render()
-      toast('Sync failed: ' + r.SKU + ' \u2014 ' + (e?.message || e), 'error')
-      throw e
+  // Prevent concurrent sync on same device (double-tap guard)
+  if (syncInProgress) { toast('Sync already in progress', 'warning'); return }
+  syncInProgress = true
+  try {
+    const rows = db.get()
+    const pending = rows.filter(r => r._status !== 'SYNCED')
+    if (!pending.length) {
+      toast('Nothing to sync', 'info')
+      return
     }
-  }
-  toast(synced + ' record(s) synced', 'success')
+    if (!driveId || !itemId) await resolveWorkbook()
 
-  // Auto-refresh KPI sheet in background (non-blocking)
-  toast('KPI sheet updating in background...', 'info')
-  refreshKPIs()
-    .then(() => toast('KPI sheet updated', 'success'))
-    .catch(e => {
-      console.warn('KPI refresh failed:', e.message)
-      toast('KPI update failed — try syncing again', 'warning')
-    })
+    let synced = 0
+    let failed = 0
+    for (const r of pending) {
+      try {
+        r._status = 'UPLOADING'
+        db.set(rows); render()
+
+        let photoUrl = ''
+        if (r._photoLocal) {
+          const blob = dataUrlToBlob(r._photoLocal)
+          const file = new File([blob], 'photo.jpg', { type: blob.type || 'image/jpeg' })
+          photoUrl = await uploadPhotoToOneDrive(file, r.SKU)
+        }
+        r.PhotoUrl = photoUrl
+        r._status = 'WRITING'
+        db.set(rows); render()
+
+        await addRowToExcel(r)
+
+        // Update OnHand row with last counted qty + timestamp
+        try {
+          await updateOnHandRow(r.SKU, r.CountedQty, r.Timestamp)
+        } catch (e) {
+          console.warn('OnHand update failed for ' + r.SKU + ':', e.message)
+        }
+
+        r._status = 'SYNCED'
+        r._photoLocal = ''
+        db.set(rows); render()
+        synced++
+      } catch (e) {
+        r._status = 'FAILED'
+        db.set(rows); render()
+        toast('Failed: ' + r.SKU + ' \u2014 ' + (e?.message || e), 'error')
+        failed++
+        // Continue with remaining records instead of stopping
+      }
+    }
+
+    if (synced > 0) {
+      toast(synced + ' record(s) synced' + (failed > 0 ? ', ' + failed + ' failed' : ''), failed > 0 ? 'warning' : 'success')
+    } else if (failed > 0) {
+      toast(failed + ' record(s) failed to sync — tap Sync to retry', 'error')
+    }
+
+    // Auto-refresh KPI sheet in background (non-blocking) — only if something synced
+    if (synced > 0) {
+      toast('KPI sheet updating in background...', 'info')
+      refreshKPIs()
+        .then(() => toast('KPI sheet updated', 'success'))
+        .catch(e => {
+          console.warn('KPI refresh failed:', e.message)
+          toast('KPI update failed — try syncing again', 'warning')
+        })
+    }
+  } finally {
+    syncInProgress = false
+  }
 }
 
 // =========================================================
 // FEATURE 5: KPI Dashboard — organized layout with cell-anchored charts
 // =========================================================
 const refreshKPIs = async () => {
+  // Prevent concurrent KPI refresh (e.g. two users sync at same time)
+  if (kpiInProgress) { console.warn('KPI refresh already in progress, skipping'); return }
+  kpiInProgress = true
+  try { return await _refreshKPIsInner() } finally { kpiInProgress = false }
+}
+
+const _refreshKPIsInner = async () => {
   if (!driveId || !itemId) await resolveWorkbook()
 
   // 1. Delete existing KPI sheet (if exists)
