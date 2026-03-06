@@ -78,7 +78,20 @@ const showConfirm = (title, msg, okText = 'OK', okStyle = '') => new Promise(res
 })
 
 const timeAgo = iso => {
-  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (!iso) return ''
+  let d = new Date(iso)
+  // Handle MM-DD-YYYY H:MM AM/PM format from formatDateLocal
+  if (isNaN(d.getTime()) && typeof iso === 'string') {
+    const m = iso.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
+    if (m) {
+      let h = parseInt(m[4])
+      if (m[6].toUpperCase() === 'PM' && h < 12) h += 12
+      if (m[6].toUpperCase() === 'AM' && h === 12) h = 0
+      d = new Date(parseInt(m[3]), parseInt(m[1]) - 1, parseInt(m[2]), h, parseInt(m[5]))
+    }
+  }
+  const s = Math.floor((Date.now() - d.getTime()) / 1000)
+  if (isNaN(s) || s < 0) return ''
   if (s < 60) return 'just now'
   if (s < 3600) return Math.floor(s / 60) + 'm ago'
   if (s < 86400) return Math.floor(s / 3600) + 'h ago'

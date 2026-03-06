@@ -1,4 +1,4 @@
-const CACHE = 'cyclecount-v12'
+const CACHE = 'cyclecount-v13'
 
 self.addEventListener('install', e => {
   e.waitUntil(
